@@ -1,0 +1,8 @@
+{
+  "name": "BuddyCraft Store",
+  "description": "Premium full-stack Minecraft server store website for BuddyCraft featuring custom ranks, crate keys, coins, authentication, shopping cart, checkout, user dashboard, and a secure admin panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
