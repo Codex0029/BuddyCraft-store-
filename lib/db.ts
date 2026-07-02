@@ -1,9 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-
-// Define DB paths
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+// No filesystem imports as database is Cloudflare D1
 
 // Interface structures
 export interface User {
@@ -471,6 +466,8 @@ const DEFAULT_AUDIT_LOGS: AuditLog[] = [
   }
 ];
 
+let inMemoryDb: DatabaseSchema | null = null;
+
 export async function getDb(): Promise<DatabaseSchema> {
   const d1 = (process.env as any).DB || (process.env as any).D1_DATABASE || (globalThis as any).DB;
   if (d1 && typeof d1.prepare === 'function') {
@@ -501,34 +498,15 @@ export async function getDb(): Promise<DatabaseSchema> {
         return initialDb;
       }
     } catch (e) {
-      console.error('D1 error in getDb, falling back to FS/Default:', e);
+      console.error('D1 error in getDb:', e);
+      throw e;
     }
   }
 
-  // Filesystem fallback (works in local dev and standard AI Studio Node container)
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  if (!fs.existsSync(DB_FILE)) {
-    const initialDb: DatabaseSchema = {
-      users: DEFAULT_USERS,
-      products: DEFAULT_PRODUCTS,
-      coupons: DEFAULT_COUPONS,
-      orders: DEFAULT_ORDERS,
-      settings: DEFAULT_SETTINGS,
-      auditLogs: DEFAULT_AUDIT_LOGS,
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialDb, null, 2), 'utf-8');
-    return initialDb;
-  }
-
-  try {
-    const data = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(data) as DatabaseSchema;
-  } catch (error) {
-    console.error('Failed to parse DB, falling back to default:', error);
-    return {
+  // If D1 is completely missing, log warning and fall back to transient in-memory store
+  console.warn('D1 Database is not bound. Falling back to a transient in-memory store.');
+  if (!inMemoryDb) {
+    inMemoryDb = {
       users: DEFAULT_USERS,
       products: DEFAULT_PRODUCTS,
       coupons: DEFAULT_COUPONS,
@@ -537,6 +515,7 @@ export async function getDb(): Promise<DatabaseSchema> {
       auditLogs: DEFAULT_AUDIT_LOGS,
     };
   }
+  return inMemoryDb;
 }
 
 export async function saveDb(data: DatabaseSchema): Promise<void> {
@@ -546,13 +525,11 @@ export async function saveDb(data: DatabaseSchema): Promise<void> {
       await d1.prepare(`INSERT OR REPLACE INTO store_state (key, value) VALUES (?, ?)`).bind('db_schema', JSON.stringify(data)).run();
       return;
     } catch (e) {
-      console.error('D1 error in saveDb, falling back to FS:', e);
+      console.error('D1 error in saveDb:', e);
+      throw e;
     }
   }
 
-  // Filesystem fallback
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  console.warn('D1 Database is not bound. Saving to transient in-memory store.');
+  inMemoryDb = data;
 }
