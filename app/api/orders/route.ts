@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { items, couponCode, paymentGateway, transactionId } = body;
+    const { items, couponCode, paymentGateway, transactionId, orderId, utr, screenshot, discordUsername, minecraftUsername } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'Shopping cart is empty.' }, { status: 400 });
@@ -133,11 +133,22 @@ export async function POST(req: NextRequest) {
 
     const total = Number((subtotal - discount + tax).toFixed(2));
 
+    // Determine order ID
+    let finalOrderId = orderId;
+    if (!finalOrderId) {
+      if (paymentGateway === 'upi') {
+        const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        finalOrderId = `BC-${todayStr}-${Math.floor(1000 + Math.random() * 9000)}`;
+      } else {
+        finalOrderId = `ord-${Math.floor(100000 + Math.random() * 900000)}`;
+      }
+    }
+
     // Create Order
     const newOrder: Order = {
-      id: `ord-${Math.floor(100000 + Math.random() * 900000)}`,
+      id: finalOrderId,
       userId: user.id,
-      username: user.username,
+      username: minecraftUsername || user.username,
       email: user.email,
       items: validatedItems,
       subtotal,
@@ -145,9 +156,12 @@ export async function POST(req: NextRequest) {
       tax,
       total,
       couponCode: couponCode || undefined,
-      status: 'COMPLETED', // Real-time completion for high simulation value
+      status: paymentGateway === 'upi' ? 'PENDING' : 'COMPLETED',
       paymentGateway,
-      paymentId: transactionId || `tx_${Math.random().toString(36).substring(2, 11)}`,
+      paymentId: utr || transactionId || `tx_${Math.random().toString(36).substring(2, 11)}`,
+      utr: utr || (paymentGateway === 'upi' ? (transactionId || '') : undefined),
+      screenshot: screenshot || undefined,
+      discordUsername: discordUsername || undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -156,7 +170,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       order: newOrder,
-      message: 'Purchase completed successfully!',
+      message: paymentGateway === 'upi' 
+        ? 'Payment details submitted! Order is now pending verification.'
+        : 'Purchase completed successfully!',
     }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Server error.' }, { status: 500 });
@@ -195,21 +211,52 @@ export async function PUT(req: NextRequest) {
 
     const existingOrder = db.orders[orderIndex];
     existingOrder.status = status;
+    
+    let luckpermsLogs: string[] = [];
+    if (status === 'COMPLETED') {
+      existingOrder.verifiedAt = new Date().toISOString();
+      
+      // Look for ranks or keys or coins inside the order and simulate commands!
+      for (const item of existingOrder.items) {
+        if (item.category === 'ranks') {
+          const rankCommand = `/lp user ${existingOrder.username} parent add ${item.productName.toLowerCase()}`;
+          luckpermsLogs.push(rankCommand);
+        } else if (item.category === 'crates') {
+          const crateCommand = `/crate give ${existingOrder.username} ${item.productName.replace(' CRATE', '').toLowerCase()} ${item.quantity}`;
+          luckpermsLogs.push(crateCommand);
+        } else if (item.category === 'coins') {
+          const coinsCount = item.productName.toLowerCase().includes('500') ? 500 : item.productName.toLowerCase().includes('1000') ? 1000 : item.productName.toLowerCase().includes('2500') ? 2500 : item.productName.toLowerCase().includes('5000') ? 5000 : 10000;
+          const coinsCommand = `/coins give ${existingOrder.username} ${coinsCount * item.quantity}`;
+          luckpermsLogs.push(coinsCommand);
+        }
+      }
+    }
+    
     db.orders[orderIndex] = existingOrder;
 
     // Create Audit Log
+    const commandLogDetails = luckpermsLogs.length > 0 
+      ? `\nExecuted In-Game Commands:\n${luckpermsLogs.map(cmd => ` > ${cmd}`).join('\n')}` 
+      : '';
+      
     const newLog: AuditLog = {
       id: `log-${Date.now()}`,
       adminEmail: user.email,
       action: `ORDER_${status}`,
-      details: `Updated Order status of ${orderId} to ${status}.`,
+      details: `Updated Order status of ${orderId} to ${status}.${commandLogDetails}`,
       createdAt: new Date().toISOString(),
     };
     db.auditLogs.push(newLog);
 
     await saveDb(db);
 
-    return NextResponse.json({ order: existingOrder, message: `Order status updated to ${status}!` });
+    return NextResponse.json({ 
+      order: existingOrder, 
+      luckpermsLogs,
+      message: status === 'COMPLETED' 
+        ? `Order successfully Verified! Executed LuckPerms/Server commands.` 
+        : `Order status updated to ${status}!` 
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Server error.' }, { status: 500 });
   }

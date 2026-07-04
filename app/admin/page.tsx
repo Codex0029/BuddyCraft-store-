@@ -91,6 +91,9 @@ interface Order {
   total: number;
   status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
   paymentGateway: string;
+  utr?: string;
+  screenshot?: string;
+  discordUsername?: string;
   createdAt: string;
 }
 
@@ -167,6 +170,7 @@ export default function AdminDashboardPage() {
   const [setTwitterUrl, setSetTwitterUrl] = useState('');
   const [setTaxRate, setSetTaxRate] = useState('');
   const [setThemeColor, setSetThemeColor] = useState<'purple-cyan' | 'emerald-gold' | 'crimson-amber' | 'orange'>('orange');
+  const [viewingReceiptOrder, setViewingReceiptOrder] = useState<any | null>(null);
 
   // Load Status
   const [isLoading, setIsLoading] = useState(true);
@@ -453,8 +457,9 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleOrderAction = async (orderId: string, status: 'CANCELLED' | 'REFUNDED') => {
-    if (!confirm(`Are you sure you want to set order ${orderId} to ${status}?`)) return;
+  const handleOrderAction = async (orderId: string, status: 'CANCELLED' | 'REFUNDED' | 'COMPLETED') => {
+    const actionLabel: string = status === 'COMPLETED' ? 'COMPLETED (VERIFIED)' : status;
+    if (!confirm(`Are you sure you want to set order ${orderId} to ${actionLabel}?`)) return;
 
     try {
       const res = await fetch('/api/orders', {
@@ -871,10 +876,13 @@ export default function AdminDashboardPage() {
                       <thead>
                         <tr className="border-b border-purple-500/5 text-slate-500 text-[10px] uppercase font-bold tracking-wider text-left">
                           <th className="pb-3 pr-4">Order ID</th>
-                          <th className="pb-3 pr-4">User IGN</th>
+                          <th className="pb-3 pr-4">User (IGN)</th>
+                          <th className="pb-3 pr-4">Items / Rank</th>
+                          <th className="pb-3 pr-4">UTR / Ref</th>
+                          <th className="pb-3 pr-4">Screenshot</th>
                           <th className="pb-3 pr-4">Date Placed</th>
-                          <th className="pb-3 pr-4">Total Amount</th>
-                          <th className="pb-3 pr-4 text-center">Billing State</th>
+                          <th className="pb-3 pr-4">Amount</th>
+                          <th className="pb-3 pr-4 text-center">Status</th>
                           <th className="pb-3 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -882,23 +890,70 @@ export default function AdminDashboardPage() {
                         {orders.map((o) => (
                           <tr key={o.id} className="hover:bg-purple-500/5">
                             <td className="py-4.5 pr-4 text-cyan-400 font-bold">{o.id}</td>
-                            <td className="py-4.5 pr-4 font-sans text-slate-200">{o.username}</td>
+                            <td className="py-4.5 pr-4 font-sans text-slate-200">
+                              <div>{o.username}</div>
+                              {o.discordUsername && (
+                                <span className="block text-[10px] text-indigo-400 font-mono">@{o.discordUsername}</span>
+                              )}
+                            </td>
+                            <td className="py-4.5 pr-4 font-sans text-slate-300 max-w-[150px] truncate" title={o.items.map(i => `${i.productName} (x${i.quantity})`).join(', ')}>
+                              {o.items.map(i => `${i.productName}`).join(', ')}
+                            </td>
+                            <td className="py-4.5 pr-4 text-slate-300 font-mono">
+                              {o.utr ? (
+                                <span className="text-cyan-300 font-bold">{o.utr}</span>
+                              ) : (
+                                <span className="text-slate-600 italic">Gateway Direct</span>
+                              )}
+                            </td>
+                            <td className="py-4.5 pr-4 font-sans">
+                              {o.screenshot ? (
+                                <button
+                                  onClick={() => setViewingReceiptOrder(o)}
+                                  className="px-2 py-1 rounded bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+                                >
+                                  👁️ View Proof
+                                </button>
+                              ) : (
+                                <span className="text-slate-600 italic text-[11px]">N/A (Auto-Pay)</span>
+                              )}
+                            </td>
                             <td className="py-4.5 pr-4 text-slate-400">{new Date(o.createdAt).toLocaleDateString()}</td>
                             <td className="py-4.5 pr-4 font-bold text-slate-200">₹{o.total}</td>
                             <td className="py-4.5 text-center font-sans">
-                              <span className={`inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase ${
+                              <span className={`inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                                 o.status === 'COMPLETED'
                                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : o.status === 'PENDING'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
                                   : o.status === 'REFUNDED'
-                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                                   : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                               }`}>
-                                {o.status}
+                                {o.status === 'COMPLETED' ? 'Verified' : o.status === 'CANCELLED' ? 'Rejected' : o.status === 'PENDING' ? 'Pending' : o.status}
                               </span>
                             </td>
-                            <td className="py-4.5 text-right font-sans space-x-1.5">
+                            <td className="py-4.5 text-right font-sans space-x-1">
+                              {o.status === 'PENDING' && (
+                                <div className="flex justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleOrderAction(o.id, 'COMPLETED')}
+                                    className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500 hover:text-black border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase transition-all cursor-pointer flex items-center gap-0.5"
+                                    title="Verify & Execute Server Commands"
+                                  >
+                                    ✅ Verify
+                                  </button>
+                                  <button
+                                    onClick={() => handleOrderAction(o.id, 'CANCELLED')}
+                                    className="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-rose-400 text-[10px] font-black uppercase transition-all cursor-pointer flex items-center gap-0.5"
+                                    title="Reject & Deny Order"
+                                  >
+                                    ❌ Reject
+                                  </button>
+                                </div>
+                              )}
                               {o.status === 'COMPLETED' && (
-                                <>
+                                <div className="flex justify-end gap-1.5">
                                   <button
                                     onClick={() => handleOrderAction(o.id, 'REFUNDED')}
                                     className="px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500 hover:text-white border border-amber-500/15 text-amber-400 text-[10px] font-black uppercase transition-colors cursor-pointer"
@@ -911,7 +966,7 @@ export default function AdminDashboardPage() {
                                   >
                                     Cancel
                                   </button>
-                                </>
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -1444,6 +1499,133 @@ export default function AdminDashboardPage() {
                   Save Coupon Code
                 </button>
               </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* UPI Receipt Proof Screenshot Modal */}
+      <AnimatePresence>
+        {viewingReceiptOrder && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingReceiptOrder(null)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 15 }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md bg-[#110a24] border border-purple-500/20 rounded-3xl overflow-hidden shadow-2xl shadow-black cursor-default text-left"
+              >
+                {/* Header bar simulated phone */}
+                <div className="bg-[#181132] px-6 py-4 border-b border-purple-500/10 flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold font-mono">UPI Digital Receipt Verifier</span>
+                  </div>
+                  <button
+                    onClick={() => setViewingReceiptOrder(null)}
+                    className="text-slate-400 hover:text-white font-bold text-sm cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Receipt content wrapper */}
+                <div className="p-6 space-y-6">
+                  {/* Visual Bank Slip mockup */}
+                  <div className="p-5 rounded-2xl bg-gradient-to-b from-[#191136] to-[#0f0a21] border border-emerald-500/20 text-center space-y-4 relative overflow-hidden">
+                    {/* Watermark/grid background */}
+                    <div className="absolute inset-0 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:16px_16px] opacity-5 pointer-events-none" />
+                    
+                    {/* Successful status */}
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto">
+                      <CheckCircle className="w-6 h-6" />
+                    </div>
+                    
+                    <div>
+                      <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-400 font-mono">Transaction Successful</span>
+                      <h4 className="text-2xl font-black text-white mt-1">₹{viewingReceiptOrder.total.toFixed(2)}</h4>
+                    </div>
+
+                    <div className="border-t border-purple-500/10 pt-4 space-y-2.5 text-xs text-left">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-mono uppercase text-[10px]">Order ID</span>
+                        <span className="text-cyan-400 font-bold font-mono">{viewingReceiptOrder.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-mono uppercase text-[10px]">UTR Ref No.</span>
+                        <span className="text-white font-bold font-mono text-[13px]">{viewingReceiptOrder.utr}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-mono uppercase text-[10px]">Minecraft IGN</span>
+                        <span className="text-indigo-300 font-bold">{viewingReceiptOrder.username}</span>
+                      </div>
+                      {viewingReceiptOrder.discordUsername && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 font-mono uppercase text-[10px]">Discord</span>
+                          <span className="text-slate-300 font-semibold font-mono">@{viewingReceiptOrder.discordUsername}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-mono uppercase text-[10px]">Recipient UPI ID</span>
+                        <span className="text-slate-300 font-semibold font-mono">buddycraft@upi</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400 font-mono uppercase text-[10px]">Timestamp</span>
+                        <span className="text-slate-400 font-mono text-[11px]">{new Date(viewingReceiptOrder.createdAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Screenshot representation */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] uppercase tracking-widest font-bold text-slate-500 font-mono">Submitted Image Attachment</label>
+                    <div className="p-3 rounded-xl bg-black/40 border border-purple-500/10 flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400 truncate max-w-[250px]">{viewingReceiptOrder.screenshot || 'screenshot_proof.png'}</span>
+                      <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-bold uppercase font-sans">PNG Image</span>
+                    </div>
+                  </div>
+
+                  {/* Quick Verification Actions */}
+                  <div className="space-y-3 pt-2">
+                    {viewingReceiptOrder.status === 'PENDING' ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={async () => {
+                            await handleOrderAction(viewingReceiptOrder.id, 'COMPLETED');
+                            setViewingReceiptOrder(null);
+                          }}
+                          className="py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-all shadow-lg shadow-emerald-950/40"
+                        >
+                          Verify Payment
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await handleOrderAction(viewingReceiptOrder.id, 'CANCELLED');
+                            setViewingReceiptOrder(null);
+                          }}
+                          className="py-3 rounded-xl bg-black/40 border border-rose-500/20 hover:bg-rose-500/10 text-rose-400 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition-all"
+                        >
+                          Reject / Deny
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setViewingReceiptOrder(null)}
+                        className="w-full py-3 rounded-xl bg-black/40 border border-purple-500/15 text-slate-300 text-xs font-bold uppercase tracking-wider cursor-pointer"
+                      >
+                        Dismiss Viewer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
           </>
         )}

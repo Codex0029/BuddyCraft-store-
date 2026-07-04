@@ -430,14 +430,16 @@ export default function UserDashboardPage() {
                                 </td>
                                 <td className="py-4.5 pr-4 font-bold text-slate-200">₹{o.total}</td>
                                 <td className="py-4.5 text-center font-sans">
-                                  <span className={`inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase ${
+                                  <span className={`inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider ${
                                     o.status === 'COMPLETED'
                                       ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                      : o.status === 'REFUNDED'
+                                      : o.status === 'PENDING'
                                       ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                      : o.status === 'REFUNDED'
+                                      ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                                       : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                                   }`}>
-                                    {o.status}
+                                    {o.status === 'COMPLETED' ? 'Verified' : o.status === 'CANCELLED' ? 'Rejected' : o.status === 'PENDING' ? 'Pending' : o.status}
                                   </span>
                                 </td>
                               </tr>

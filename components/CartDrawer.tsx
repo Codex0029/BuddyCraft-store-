@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp, CartItem } from '@/context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ShoppingBag, Trash2, Tag, ArrowRight, ShieldCheck, CreditCard, Sparkles, CheckCircle, RefreshCw } from 'lucide-react';
+import { X, ShoppingBag, Trash2, Tag, ArrowRight, ShieldCheck, CreditCard, Sparkles, CheckCircle, RefreshCw, Copy, Check, Clock, Upload, Sparkle, AlertCircle, AlertTriangle } from 'lucide-react';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -16,14 +16,56 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
   const [couponInput, setCouponInput] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'cart' | 'payment' | 'success'>('cart');
-  const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'razorpay' | 'crypto'>('stripe');
+  const [paymentGateway, setPaymentGateway] = useState<'upi' | 'stripe' | 'paypal' | 'razorpay' | 'crypto'>('upi');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<any>(null);
 
-  // Form states for fake checkout
+  // Form states for manual UPI payment
+  const [upiStep, setUpiStep] = useState<'pay' | 'form'>('pay');
+  const [generatedOrderId, setGeneratedOrderId] = useState('');
+  const [minecraftUsername, setMinecraftUsername] = useState('');
+  const [utr, setUtr] = useState('');
+  const [discordUsername, setDiscordUsername] = useState('');
+  const [screenshotName, setScreenshotName] = useState('');
+  const [isUploadingScreenshot, setIsUploadingScreenshot] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(600);
+  const [copiedUpi, setCopiedUpi] = useState(false);
+
+  // Form states for fake stripe checkout
   const [fakeCardName, setFakeCardName] = useState('');
   const [fakeCardNumber, setFakeCardNumber] = useState('');
   const [fakeCryptoAddress, setFakeCryptoAddress] = useState('0xBuddyCraftCryptoPaymentsAddressX719F');
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (checkoutStep === 'payment' && paymentGateway === 'upi' && upiStep === 'pay' && isOpen) {
+      const timer = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [checkoutStep, paymentGateway, upiStep, isOpen]);
+
+  // Format countdown mm:ss
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Copy UPI ID helper
+  const handleCopyUpi = () => {
+    navigator.clipboard.writeText('buddycraft@ybl');
+    setCopiedUpi(true);
+    addToast('UPI ID buddycraft@ybl copied to clipboard!', 'success');
+    setTimeout(() => setCopiedUpi(false), 2000);
+  };
 
   // Calculation values
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -57,6 +99,23 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
       onOpenAuth('login');
       return;
     }
+
+    // Generate static Order ID
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    setGeneratedOrderId(`BC-${yyyy}${mm}${dd}-${rand}`);
+
+    // Pre-fill form fields
+    setMinecraftUsername(user.username || '');
+    setDiscordUsername(user.discordUsername || '');
+    setUtr('');
+    setScreenshotName('');
+    setUpiStep('pay');
+    setTimeLeft(600);
+
     setCheckoutStep('payment');
   };
 
@@ -66,10 +125,25 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
       return;
     }
 
-    setIsProcessingPayment(true);
-    addToast('Contacting safe gaming gateway...', 'info');
+    if (paymentGateway === 'upi') {
+      if (!minecraftUsername.trim()) {
+        addToast('Minecraft Username is required.', 'error');
+        return;
+      }
+      if (!utr.trim()) {
+        addToast('Please enter your 12-digit UPI UTR number.', 'error');
+        return;
+      }
+      if (!/^\d{12}$/.test(utr.trim())) {
+        addToast('Invalid UTR format. Please enter exactly 12 numeric digits.', 'error');
+        return;
+      }
+    }
 
-    // Simulate safe API wait
+    setIsProcessingPayment(true);
+    addToast(paymentGateway === 'upi' ? 'Submitting UPI transaction proof...' : 'Contacting safe gaming gateway...', 'info');
+
+    // Simulate server POST
     setTimeout(async () => {
       try {
         const res = await fetch('/api/orders', {
@@ -85,6 +159,11 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
             })),
             couponCode: appliedCoupon?.code,
             paymentGateway,
+            orderId: paymentGateway === 'upi' ? generatedOrderId : undefined,
+            utr: paymentGateway === 'upi' ? utr.trim() : undefined,
+            screenshot: paymentGateway === 'upi' ? screenshotName : undefined,
+            minecraftUsername: paymentGateway === 'upi' ? minecraftUsername.trim() : undefined,
+            discordUsername: paymentGateway === 'upi' ? (discordUsername.trim() || undefined) : undefined,
           }),
         });
 
@@ -96,7 +175,7 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
           setCheckoutStep('success');
           clearCart();
           removeCoupon();
-          addToast('Order placed successfully! Check your user dashboard.', 'success');
+          addToast(paymentGateway === 'upi' ? 'Payment submitted for verification!' : 'Order placed successfully! Check your user dashboard.', 'success');
         } else {
           addToast(data.error || 'Checkout failed.', 'error');
         }
@@ -112,6 +191,11 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
     setPlacedOrder(null);
     setFakeCardName('');
     setFakeCardNumber('');
+    setMinecraftUsername('');
+    setUtr('');
+    setDiscordUsername('');
+    setScreenshotName('');
+    setUpiStep('pay');
     onClose();
   };
 
@@ -270,34 +354,242 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
               {/* STEP 2: PAYMENT GATEWAY */}
               {checkoutStep === 'payment' && (
                 <div className="space-y-6 text-left" id="payment-gateways-container">
-                  <div>
-                    <span className="block text-xs uppercase tracking-wider text-slate-400 font-bold font-mono mb-2.5">
-                      Select Payment Gateway
-                    </span>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {[
-                        { id: 'stripe', label: 'Credit Card', desc: 'Secure Stripe Checkout' },
-                        { id: 'paypal', label: 'PayPal', desc: 'Instant Wallet Pay' },
-                        { id: 'razorpay', label: 'Razorpay', desc: 'All Card Systems' },
-                        { id: 'crypto', label: 'Crypto', desc: 'BTC, ETH, LTC' },
-                      ].map((gw) => (
-                        <button
-                          key={gw.id}
-                          onClick={() => setPaymentGateway(gw.id as any)}
-                          className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
-                            paymentGateway === gw.id
-                              ? 'bg-purple-500/10 border-purple-500 text-white shadow-lg'
-                              : 'bg-[#150f29] border-purple-500/10 text-slate-400 hover:bg-[#1a1233] hover:text-slate-200'
-                          }`}
-                        >
-                          <span className="block text-sm font-bold">{gw.label}</span>
-                          <span className="block text-[10px] text-slate-500 font-mono mt-0.5">{gw.desc}</span>
-                        </button>
-                      ))}
+                  {/* Gateway selector - Hide when in form step for distraction-free form filling */}
+                  {!(paymentGateway === 'upi' && upiStep === 'form') && (
+                    <div>
+                      <span className="block text-xs uppercase tracking-wider text-slate-400 font-bold font-mono mb-2.5">
+                        Select Payment Gateway
+                      </span>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {[
+                          { id: 'upi', label: 'UPI / QR Code', desc: 'Zero Fees Manual Verify' },
+                          { id: 'stripe', label: 'Credit Card', desc: 'Secure Stripe Checkout' },
+                          { id: 'paypal', label: 'PayPal', desc: 'Instant Wallet Pay' },
+                          { id: 'razorpay', label: 'Razorpay', desc: 'All Card Systems' },
+                          { id: 'crypto', label: 'Crypto', desc: 'BTC, ETH, LTC' },
+                        ].map((gw) => (
+                          <button
+                            key={gw.id}
+                            onClick={() => setPaymentGateway(gw.id as any)}
+                            className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                              paymentGateway === gw.id
+                                ? 'bg-purple-500/10 border-purple-500 text-white shadow-lg'
+                                : 'bg-[#150f29] border-purple-500/10 text-slate-400 hover:bg-[#1a1233] hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="block text-sm font-bold">{gw.label}</span>
+                            <span className="block text-[10px] text-slate-500 font-mono mt-0.5">{gw.desc}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Input details based on gateway */}
+                  {paymentGateway === 'upi' && upiStep === 'pay' && (
+                    <div className="space-y-4">
+                      {/* Step Title */}
+                      <div className="flex justify-between items-center bg-purple-500/5 border border-purple-500/10 rounded-xl p-3">
+                        <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">Step 1 of 2: Scan & Pay</span>
+                        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-mono font-bold ${
+                          timeLeft < 180 ? 'bg-rose-500/15 text-rose-400 animate-pulse' : 'bg-cyan-500/10 text-cyan-400'
+                        }`}>
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{formatTime(timeLeft)}</span>
+                        </div>
+                      </div>
+
+                      {/* Display Order ID */}
+                      <div className="flex justify-between items-center text-xs font-semibold bg-black/30 border border-purple-500/5 rounded-xl px-4 py-3">
+                        <span className="text-slate-400 font-mono">PRE-ASSIGNED ORDER ID:</span>
+                        <span className="text-cyan-400 font-mono font-bold select-all">{generatedOrderId}</span>
+                      </div>
+
+                      {/* QR Code Container */}
+                      <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-[#140e29] border border-purple-500/10 relative overflow-hidden group">
+                        <div className="absolute inset-0 bg-gradient-to-b from-purple-500/5 to-transparent pointer-events-none" />
+                        
+                        {/* Interactive Scanner laser simulation */}
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-cyan-500/40 animate-bounce pointer-events-none" />
+
+                        {/* QR Code SVG */}
+                        <div className="w-44 h-44 bg-white p-2 rounded-2xl shadow-xl shadow-purple-950/20 flex items-center justify-center relative">
+                          <svg viewBox="0 0 100 100" className="w-full h-full text-[#110b21]">
+                            {/* Outer Corners */}
+                            <rect x="0" y="0" width="25" height="25" fill="currentColor" />
+                            <rect x="3" y="3" width="19" height="19" fill="white" />
+                            <rect x="7" y="7" width="11" height="11" fill="currentColor" />
+
+                            <rect x="75" y="0" width="25" height="25" fill="currentColor" />
+                            <rect x="78" y="3" width="19" height="19" fill="white" />
+                            <rect x="82" y="7" width="11" height="11" fill="currentColor" />
+
+                            <rect x="0" y="75" width="25" height="25" fill="currentColor" />
+                            <rect x="3" y="78" width="19" height="19" fill="white" />
+                            <rect x="7" y="82" width="11" height="11" fill="currentColor" />
+
+                            {/* Stylized Matrix dots simulating a real QR code */}
+                            <rect x="35" y="5" width="5" height="10" fill="currentColor" />
+                            <rect x="45" y="0" width="10" height="5" fill="currentColor" />
+                            <rect x="60" y="10" width="5" height="15" fill="currentColor" />
+                            
+                            <rect x="5" y="35" width="10" height="5" fill="currentColor" />
+                            <rect x="0" y="45" width="5" height="10" fill="currentColor" />
+                            <rect x="10" y="60" width="15" height="5" fill="currentColor" />
+
+                            <rect x="30" y="30" width="40" height="40" fill="currentColor" opacity="0.1" />
+
+                            {/* Minecraft Sword styled pixels in the center */}
+                            <path d="M48,32 L52,32 L52,36 L48,36 Z M44,36 L48,36 L48,40 L44,40 Z M48,40 L52,40 L52,44 L48,44 Z M52,44 L56,44 L56,48 L52,48 Z" fill="#8b5cf6" />
+                            <path d="M52,40 L56,40 L56,44 L52,44 Z M56,44 L60,44 L60,48 L56,48 Z M60,48 L64,48 L64,52 L60,52 Z" fill="#06b6d4" />
+                            <rect x="38" y="48" width="8" height="8" fill="currentColor" />
+                            <rect x="54" y="62" width="8" height="8" fill="currentColor" />
+
+                            {/* Random bits */}
+                            <rect x="35" y="80" width="10" height="5" fill="currentColor" />
+                            <rect x="40" y="85" width="5" height="10" fill="currentColor" />
+                            <rect x="55" y="75" width="10" height="10" fill="currentColor" />
+                            <rect x="70" y="35" width="15" height="10" fill="currentColor" />
+                            <rect x="80" y="50" width="10" height="15" fill="currentColor" />
+                            <rect x="85" y="85" width="10" height="10" fill="currentColor" />
+                          </svg>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono font-bold mt-3 uppercase tracking-wider">
+                          QR Code for Instant Scan
+                        </span>
+                      </div>
+
+                      {/* Payment Instructions */}
+                      <div className="space-y-3 bg-black/20 rounded-2xl border border-purple-500/10 p-4">
+                        <div className="flex justify-between items-center border-b border-purple-500/5 pb-2.5">
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 font-mono">PAYABLE AMOUNT:</span>
+                          <span className="text-sm font-black font-sans text-cyan-400">₹{total}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 font-mono">UPI ID:</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-200 font-mono select-all">buddycraft@ybl</span>
+                            <button
+                              type="button"
+                              onClick={handleCopyUpi}
+                              className="p-1 rounded bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 transition-colors cursor-pointer"
+                              title="Copy UPI ID"
+                            >
+                              {copiedUpi ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed font-semibold pt-1 border-t border-purple-500/5">
+                          ⚠️ Scan QR or pay to UPI ID using any UPI App (GPay, PhonePe, Paytm). Pay exactly <span className="text-cyan-400">₹{total}</span> to avoid verification delays. Once paid, click the button below to fill out proof.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {paymentGateway === 'upi' && upiStep === 'form' && (
+                    <div className="space-y-4 bg-[#17102e] border border-purple-500/10 rounded-2xl p-5">
+                      <div className="flex items-center gap-1.5 text-xs text-purple-400 font-bold font-mono uppercase mb-2">
+                        <Sparkle className="w-4 h-4 text-purple-400" />
+                        Verification Proof Details
+                      </div>
+
+                      <div className="space-y-3.5">
+                        {/* Pre-assigned Order ID (Disabled) */}
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1 font-mono">Order ID (Auto-Generated)</label>
+                          <input
+                            type="text"
+                            disabled
+                            value={generatedOrderId}
+                            className="w-full bg-[#120c24] border border-purple-500/10 rounded-lg px-3 py-2 text-xs font-bold text-slate-500 font-mono"
+                          />
+                        </div>
+
+                        {/* Minecraft Username */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-[10px] uppercase font-bold text-slate-400 font-mono">Minecraft IGN</label>
+                            <span className="text-[9px] text-purple-400 font-mono">Will receive rewards</span>
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Steve"
+                            value={minecraftUsername}
+                            onChange={(e) => setMinecraftUsername(e.target.value)}
+                            className="w-full bg-[#120c24] border border-purple-500/15 focus:border-purple-500/40 outline-none rounded-lg px-3 py-2 text-xs font-semibold text-slate-100"
+                          />
+                        </div>
+
+                        {/* UTR Number */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-[10px] uppercase font-bold text-slate-400 font-mono">UTR / Ref Number (12 Digits)</label>
+                            <span className="text-[9px] text-cyan-400 font-mono font-bold">REQUIRED</span>
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            maxLength={12}
+                            placeholder="604218937402"
+                            value={utr}
+                            onChange={(e) => setUtr(e.target.value.replace(/\D/g, ''))}
+                            className="w-full bg-[#120c24] border border-purple-500/15 focus:border-purple-500/40 outline-none rounded-lg px-3 py-2 text-xs font-semibold text-slate-100 font-mono"
+                          />
+                        </div>
+
+                        {/* Discord Account */}
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1 font-mono">Discord Username (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="gamer_steve#1234"
+                            value={discordUsername}
+                            onChange={(e) => setDiscordUsername(e.target.value)}
+                            className="w-full bg-[#120c24] border border-purple-500/15 focus:border-purple-500/40 outline-none rounded-lg px-3 py-2 text-xs font-semibold text-slate-100"
+                          />
+                        </div>
+
+                        {/* Drag and Drop Screenshot Simulation */}
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1.5 font-mono">Receipt Screenshot (Optional)</label>
+                          <div 
+                            onClick={() => {
+                              if (isUploadingScreenshot) return;
+                              setIsUploadingScreenshot(true);
+                              addToast('Simulating screenshot upload...', 'info');
+                              setTimeout(() => {
+                                setIsUploadingScreenshot(false);
+                                setScreenshotName('screenshot_receipt_' + Math.floor(1000 + Math.random() * 9000) + '.png');
+                                addToast('Payment receipt screenshot attached!', 'success');
+                              }, 1200);
+                            }}
+                            className="border border-dashed border-purple-500/20 hover:border-purple-500/40 bg-black/20 hover:bg-black/30 rounded-xl p-4.5 text-center cursor-pointer transition-all flex flex-col items-center justify-center space-y-1.5"
+                          >
+                            {isUploadingScreenshot ? (
+                              <>
+                                <RefreshCw className="w-5 h-5 text-purple-400 animate-spin" />
+                                <span className="text-[10px] font-mono text-slate-400">Uploading to ledger nodes...</span>
+                              </>
+                            ) : screenshotName ? (
+                              <>
+                                <CheckCircle className="w-5 h-5 text-emerald-400" />
+                                <span className="text-[10px] font-mono text-emerald-400 font-bold">{screenshotName} (142 KB)</span>
+                                <span className="text-[9px] text-slate-500">Click to replace screenshot</span>
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="w-5 h-5 text-slate-500" />
+                                <span className="text-[10px] font-bold text-slate-300">Drag & Drop or Click to Upload</span>
+                                <span className="text-[9px] text-slate-500">Supports PNG, JPG, JPEG</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {paymentGateway === 'stripe' && (
                     <div className="p-4 rounded-xl bg-[#17102e] border border-purple-500/10 space-y-3.5">
                       <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-bold font-mono uppercase mb-1">
@@ -376,19 +668,40 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
                     <CheckCircle className="w-8 h-8" />
                   </motion.div>
                   <div>
-                    <h3 className="text-xl font-black text-white">Payment Confirmed!</h3>
-                    <p className="text-xs text-cyan-400 font-bold font-mono mt-1">ORDER ID: {placedOrder.id}</p>
+                    <h3 className="text-xl font-black text-white">
+                      {placedOrder.paymentGateway === 'upi' ? 'Proof Submitted!' : 'Payment Confirmed!'}
+                    </h3>
+                    <p className="text-xs text-cyan-400 font-bold font-mono mt-1 font-sans">ORDER ID: {placedOrder.id}</p>
                   </div>
                   <p className="text-sm text-slate-400 max-w-[280px]">
-                    Awesome, <strong>{user?.username}</strong>! Your purchase total of <strong>₹{placedOrder.total}</strong> was completed.
-                    Your server rewards have been pushed and are currently queueing for delivery inside Minecraft!
+                    {placedOrder.paymentGateway === 'upi' ? (
+                      <>
+                        Awesome, <strong>{placedOrder.username}</strong>! Your UPI payment details for <strong>₹{placedOrder.total}</strong> have been uploaded. Our admin staff is validating your UTR.
+                      </>
+                    ) : (
+                      <>
+                        Awesome, <strong>{user?.username}</strong>! Your purchase total of <strong>₹{placedOrder.total}</strong> was completed. Your rewards are now queueing for in-game delivery!
+                      </>
+                    )}
                   </p>
-                  <div className="p-4 rounded-xl bg-[#150f29] border border-purple-500/15 w-full text-left space-y-1">
-                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-bold font-mono">Delivery Status</span>
-                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5 font-mono">
-                      <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-spin" /> PUSHING IN-GAME...
-                    </span>
-                  </div>
+                  {placedOrder.paymentGateway === 'upi' ? (
+                    <div className="p-4 rounded-xl bg-[#1c152e] border border-yellow-500/20 w-full text-left space-y-1">
+                      <span className="block text-[9px] uppercase tracking-wider text-yellow-500 font-bold font-mono">Verification Status</span>
+                      <span className="text-xs font-black text-yellow-400 flex items-center gap-1.5 font-sans uppercase">
+                        <Clock className="w-3.5 h-3.5 text-yellow-400 animate-pulse" /> PENDING VERIFICATION
+                      </span>
+                      <p className="text-[10px] text-slate-400 font-mono mt-1 leading-normal">
+                        Our ledger is awaiting staff manual approval for UTR: <span className="text-cyan-400 font-bold">{placedOrder.paymentId}</span>. Check your user dashboard for live tracking updates!
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-[#150f29] border border-purple-500/15 w-full text-left space-y-1">
+                      <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-bold font-mono">Delivery Status</span>
+                      <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5 font-mono">
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-spin" /> PUSHING IN-GAME...
+                      </span>
+                    </div>
+                  )}
                   <button
                     onClick={resetCheckout}
                     className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold tracking-wider cursor-pointer"
@@ -434,21 +747,62 @@ export default function CartDrawer({ isOpen, onClose, onOpenAuth }: CartDrawerPr
                   </button>
                 ) : (
                   <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setCheckoutStep('cart')}
-                      disabled={isProcessingPayment}
-                      className="py-3 rounded-xl bg-black/40 border border-purple-500/15 text-slate-300 text-xs font-bold cursor-pointer disabled:opacity-50"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handleCompletePayment}
-                      disabled={isProcessingPayment}
-                      className="py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
-                      id="checkout-complete-btn"
-                    >
-                      {isProcessingPayment ? 'Processing...' : `Pay ₹${total}`}
-                    </button>
+                    {paymentGateway === 'upi' ? (
+                      upiStep === 'pay' ? (
+                        <>
+                          <button
+                            onClick={() => setCheckoutStep('cart')}
+                            className="py-3 rounded-xl bg-black/40 border border-purple-500/15 text-slate-300 text-xs font-bold cursor-pointer"
+                          >
+                            Back to Cart
+                          </button>
+                          <button
+                            onClick={() => setUpiStep('form')}
+                            className="py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5"
+                            id="checkout-complete-btn"
+                          >
+                            {"I've Paid (Next)"}
+                            <ArrowRight className="w-4 h-4" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setUpiStep('pay')}
+                            disabled={isProcessingPayment}
+                            className="py-3 rounded-xl bg-black/40 border border-purple-500/15 text-slate-300 text-xs font-bold cursor-pointer disabled:opacity-50"
+                          >
+                            Back to Scan
+                          </button>
+                          <button
+                            onClick={handleCompletePayment}
+                            disabled={isProcessingPayment}
+                            className="py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 animate-pulse"
+                            id="checkout-complete-btn"
+                          >
+                            {isProcessingPayment ? 'Submitting...' : 'Confirm Submit'}
+                          </button>
+                        </>
+                      )
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setCheckoutStep('cart')}
+                          disabled={isProcessingPayment}
+                          className="py-3 rounded-xl bg-black/40 border border-purple-500/15 text-slate-300 text-xs font-bold cursor-pointer disabled:opacity-50"
+                        >
+                          Back
+                        </button>
+                        <button
+                          onClick={handleCompletePayment}
+                          disabled={isProcessingPayment}
+                          className="py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          id="checkout-complete-btn"
+                        >
+                          {isProcessingPayment ? 'Processing...' : `Pay ₹${total}`}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
